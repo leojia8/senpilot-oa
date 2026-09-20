@@ -124,6 +124,28 @@ $69,275,000 (assignment example said 13 / 5 / 21 / 0 / 0 and $69,270,000). Extra
 - M12205 Other Documents contains **genuinely duplicated PDFs** (102329==102330,
   102197==102202, byte-identical). Verified as source data, not a scraper bug.
 
+
+## Gmail behaviour (learned the hard way)
+
+- **A new Gmail account files first-contact mail as spam.** The reviewers' first email will
+  very likely land there. `messages.list` excludes spam unless `includeSpamTrash=True`, so
+  the agent polls spam too. Policy: a spam message that parses as a valid request is rescued
+  (`unmark_spam`) and answered; a spam message that does not parse is dropped **silently** --
+  never reply to spam, it risks the account.
+- **Never reply to automated senders.** Bounces (`mailer-daemon`), `no-reply@`, and
+  `notifications@` are filtered by `mailer.is_automated()`; replying invites a mail loop.
+- **Gmail caps messages at 25MB and base64 inflates attachments ~33%**, so the raw ZIP limit
+  is 17MB (`MAX_ATTACHMENT_BYTES`), not 25.
+- The agent's own replies may land in the *recipient's* spam folder too -- worth telling
+  reviewers to check.
+
+## Gemini quota
+
+The free tier allows roughly 20 requests/day, so `GEMINI_MODE` gates the API:
+`mock` (default, never calls), `live` (always), `auto` (live only when a key is set).
+The regex/keyword fallback in `agent/parser.py` passes every parser test on its own, so
+`mock` is fully functional -- flip to `live` only for the demo.
+
 ## Environment
 `python` is **not** on PATH on this machine, and `py -3.13` is a broken Microsoft Store stub.
 Use the venv binaries directly:
@@ -141,11 +163,12 @@ Use the venv binaries directly:
 5. ✅ Tab selection + download ≤10 → `select_category()` / `download_documents()`
 6. ✅ ZIP + verification → `agent/packager.py`; CLI at `agent/cli.py`.
    **Milestone reached: lookup → download → ZIP works from the terminal, no Gmail.**
-7. Gmail API setup (GCP project, enable API, OAuth consent, desktop credentials, authorize
-   agent account). Inbox read + send-with-attachment, tested independently.
-8. Gemini request parsing + validation; regex fallback if setup drags. Handle invalid requests.
-9. Orchestrator integration: poll → parse → scrape → zip → reply → mark processed.
-10. End-to-end test: real email requesting Other Documents from M12205.
+7. ✅ Gmail API — `agent/mailer.py`. Authorised as senpilot.oa.agent@gmail.com; send with
+   a real 10MB ZIP attachment confirmed delivered.
+8. ✅ Gemini request parsing — `agent/parser.py`, with a regex/keyword fallback that works
+   with no API key at all. Invalid/incomplete requests raise `ParseError`.
+9. ✅ Orchestrator — `agent/main.py`; all six routing branches tested with stubs.
+10. ⬜ Live end-to-end test — next step.
 11. *If time remains:* reliability, optional background-worker deployment. Never at the
     expense of core functionality.
 12. README (architecture, setup, usage, completed features, limitations). Leo records the
