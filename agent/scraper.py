@@ -150,14 +150,18 @@ ROWS_JS = """() => {
   // instead: the identifier and the Security value share the leftmost column,
   // with the identifier sitting just above it. Titles are further right, so the
   // x bound must stay tight enough to exclude them.
-  const left = [...document.querySelectorAll('div.text')].map(d => {
+  const cells = [...document.querySelectorAll('div.text')].map(d => {
     const r = d.getBoundingClientRect();
     return {t: (d.textContent || '').trim(), x: r.x, y: r.y + r.height / 2};
-  }).filter(o => o.t && o.x < 100);
+  }).filter(o => o.t);
+  const left = cells.filter(o => o.x < 100);
+  const mid = cells.filter(o => o.x >= 100 && o.x < 900);
   return ggi.map((e, i) => {
     const r = e.getBoundingClientRect(), y = r.y + r.height / 2;
     const c = left.filter(o => Math.abs(o.y - y) < 40).sort((a, b) => a.y - b.y);
-    return {index: i, doc_no: c.length ? c[0].t : null, y: Math.round(y)};
+    const t = mid.filter(o => Math.abs(o.y - y) < 40).sort((a, b) => a.y - b.y);
+    return {index: i, doc_no: c.length ? c[0].t : null,
+            title: t.length ? t[0].t : null, y: Math.round(y)};
   });
 }"""
 
@@ -177,6 +181,36 @@ MODAL_FILE_JS = """() => {
 
 def _norm(s):
     return re.sub(r"\s+", "", (s or "")).lower()
+
+
+# The Recordings tab's leftmost column is a date, not an identifier, so there is
+# nothing meaningful to cross-check the modal filename against.
+DATE_LIKE = re.compile(r"^\d{1,2}/\d{1,2}/\d{2,4}$")
+
+
+def _await_modal_filename(page, timeout=30000):
+    """Poll for the download modal's filename button."""
+    deadline = time.monotonic() + timeout / 1000
+    while time.monotonic() < deadline:
+        name = page.evaluate(MODAL_FILE_JS)
+        if name:
+            return name
+        page.wait_for_timeout(500)
+    return None
+
+
+def _handle_export_dialog(page):
+    """Container fields (Recordings) open an export dialog before the download.
+
+    It pre-fills the correct filename, e.g. "M 12400.MP3", so the default is
+    accepted rather than overwritten; clicking OK yields the usual download modal.
+    """
+    field = page.locator(MODAL).locator("input.v-textfield")
+    if not field.count():
+        return False
+    page.locator(MODAL).locator("div.v-button").filter(has_text="OK").first.click()
+    page.wait_for_timeout(1500)
+    return True
 
 
 def _unique(dest, name):
@@ -203,6 +237,8 @@ def download_documents(page, dest, max_docs=10, log=print):
 
     Each download takes two clicks: GO GET IT opens a modal, and the filename
     button inside that modal fires the actual download. Failures are per-document.
+
+    Returns (saved, failed), where saved holds {path, doc_no, title} per document.
     """
     dest = Path(dest)
     dest.mkdir(parents=True, exist_ok=True)
@@ -214,19 +250,24 @@ def download_documents(page, dest, max_docs=10, log=print):
         try:
             page.get_by_text("GO GET IT", exact=False).nth(row["index"]).click()
             page.wait_for_selector(MODAL, state="visible", timeout=30000)
-            name = page.evaluate(MODAL_FILE_JS)
+            exported = _handle_export_dialog(page)
+            name = _await_modal_filename(page)
             if not name:
                 raise RuntimeError("no filename button in modal")
             # The modal must offer the file from the row we actually clicked.
             # Compare loosely: case and stray spaces differ between the two
             # ("A -5" in the table becomes "A -5.pdf", "H-5(c)-ii" may re-case).
-            if row["doc_no"] and not _norm(name).startswith(_norm(row["doc_no"])):
-                raise RuntimeError(f"row/modal mismatch: row {row['doc_no']} -> {name}")
+            # Skipped for exports, whose filename comes from the server, and for
+            # tabs whose left column holds a date rather than an identifier.
+            ident = row["doc_no"]
+            if ident and not exported and not DATE_LIKE.match(ident):
+                if not _norm(name).startswith(_norm(ident)):
+                    raise RuntimeError(f"row/modal mismatch: row {ident} -> {name}")
             with page.expect_download(timeout=60000) as dl:
                 page.locator(MODAL).get_by_text(name, exact=True).first.click()
             path = _unique(dest, name)
             dl.value.save_as(str(path))
-            saved.append(path)
+            saved.append({"path": path, "doc_no": ident, "title": row.get("title")})
             log(f"    ok   {name} ({path.stat().st_size:,} bytes)")
         except Exception as e:
             failed.append(label)

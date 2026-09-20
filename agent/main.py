@@ -15,9 +15,9 @@ from pathlib import Path
 from dotenv import load_dotenv
 
 import mailer
-from packager import make_zip, verify_zip
-from parser import ParseError, parse_request
-from reply import format_error, format_reply
+from packager import make_zip_within, verify_zip
+from parser import AmbiguousRequest, ParseError, parse_request
+from reply import format_ambiguous, format_error, format_reply
 from scraper import MatterNotFound, fetch
 
 load_dotenv()
@@ -25,6 +25,11 @@ load_dotenv()
 POLL_SECONDS = int(os.environ.get("POLL_INTERVAL_SECONDS", "60"))
 MAX_DOCUMENTS = int(os.environ.get("MAX_DOCUMENTS", "10"))
 HEADLESS = os.environ.get("HEADLESS", "true").lower() != "false"
+
+# A crashed browser or a site timeout is usually transient, so the message is
+# left unread and retried. After this many failures it is answered with an
+# apology instead, so a permanently failing request cannot loop forever.
+MAX_ATTEMPTS = 3
 
 
 def log(*a):
@@ -52,6 +57,16 @@ def handle(service, msg_id, agent_address):
 
     try:
         matter, category = parse_request(text)
+    except AmbiguousRequest as e:
+        log(f"  ambiguous: matters={e.matters} categories={e.categories}")
+        if spam:
+            log("  in spam and ambiguous -- ignoring without reply")
+            return True
+        subject, body = format_ambiguous(e.matters, e.categories, msg["subject"])
+        mailer.send_reply(service, sender, subject, body,
+                          thread_id=msg["thread_id"], in_reply_to=msg["message_id"])
+        log(f"  asked {sender} to clarify")
+        return True
     except ParseError as e:
         log(f"  unparseable: {e}")
         # Genuine spam that is not a request gets silently dropped; replying to
@@ -86,32 +101,43 @@ def handle(service, msg_id, agent_address):
                               thread_id=msg["thread_id"], in_reply_to=msg["message_id"])
             return True
 
-        zip_path = None
+        # Some matters hold filings of tens of MB each, and email cannot carry
+        # them. Send as many as fit rather than refusing the whole archive.
+        zip_path, omitted = None, []
         if files:
-            zip_path = workdir / f"{info['matter_no']}_{category.replace(' ', '_')}.zip"
-            make_zip(files, zip_path)
-            verify_zip(zip_path, files)
-            log(f"  zipped {len(files)} file(s) -> {zip_path.stat().st_size:,} bytes")
+            target = workdir / f"{info['matter_no']}_{category.replace(' ', '_')}.zip"
+            zip_path, included, omitted = make_zip_within(
+                files, target, mailer.MAX_ATTACHMENT_BYTES)
+            if zip_path:
+                verify_zip(zip_path, included)
+                log(f"  zipped {len(included)} file(s) -> "
+                    f"{zip_path.stat().st_size:,} bytes")
+            if omitted:
+                log(f"  {len(omitted)} file(s) too large to attach")
 
-        # Some matters hold filings of tens of MB each. If the archive is too
-        # big to email, still reply and explain, rather than failing the send
-        # and retrying the whole request forever.
-        oversize = None
-        if zip_path and zip_path.stat().st_size > mailer.MAX_ATTACHMENT_BYTES:
-            oversize = zip_path.stat().st_size
-            log(f"  archive is {oversize:,} bytes -- too large to attach")
-
-        subject, body = format_reply(info, category, len(files), failed,
-                                     zip_path.name if zip_path and not oversize else None,
-                                     MAX_DOCUMENTS, oversize)
-        mailer.send_reply(service, sender, subject, body,
-                          attachment=None if oversize else zip_path,
+        subject, body = format_reply(info, category, files, failed,
+                                     zip_path.name if zip_path else None,
+                                     MAX_DOCUMENTS, omitted)
+        mailer.send_reply(service, sender, subject, body, attachment=zip_path,
                           thread_id=msg["thread_id"], in_reply_to=msg["message_id"])
-        log(f"  replied to {sender} with {len(files)} document(s)"
-            + (" (archive too large to attach)" if oversize else ""))
+        log(f"  replied to {sender} with {len(files) - len(omitted)} attached"
+            + (f", {len(omitted)} omitted" if omitted else ""))
         return True
     finally:
         shutil.rmtree(workdir, ignore_errors=True)
+
+
+def notify_failure(service, msg_id, error):
+    """Tell the requester their request could not be completed."""
+    msg = mailer.get_message(service, msg_id)
+    if mailer.is_automated(msg["sender"]) or mailer.is_spam(msg):
+        return
+    subject, body = format_error(
+        f"the lookup failed repeatedly ({error}). This is usually a temporary "
+        "problem with the board's website -- please try again shortly",
+        msg["subject"])
+    mailer.send_reply(service, msg["sender"], subject, body,
+                      thread_id=msg["thread_id"], in_reply_to=msg["message_id"])
 
 
 def main():
@@ -120,15 +146,27 @@ def main():
     once = "--once" in sys.argv
     log(f"agent ready as {agent_address} (poll {POLL_SECONDS}s, max {MAX_DOCUMENTS} docs)")
 
+    attempts = {}
     while True:
         try:
             for msg_id in mailer.list_requests(service):
                 try:
                     if handle(service, msg_id, agent_address):
                         mailer.mark_read(service, msg_id)
-                except Exception:
+                        attempts.pop(msg_id, None)
+                except Exception as e:
                     # Leave it unread so the next pass retries it.
-                    log(f"  ERROR handling {msg_id}:\n{traceback.format_exc()}")
+                    n = attempts[msg_id] = attempts.get(msg_id, 0) + 1
+                    log(f"  ERROR handling {msg_id} (attempt {n}/{MAX_ATTEMPTS}):\n"
+                        f"{traceback.format_exc()}")
+                    if n >= MAX_ATTEMPTS:
+                        log(f"  giving up on {msg_id}; notifying sender")
+                        try:
+                            notify_failure(service, msg_id, f"{type(e).__name__}")
+                            mailer.mark_read(service, msg_id)
+                            attempts.pop(msg_id, None)
+                        except Exception:
+                            log(f"  could not notify sender:\n{traceback.format_exc()}")
         except Exception:
             log(f"poll failed:\n{traceback.format_exc()}")
 

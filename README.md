@@ -49,7 +49,7 @@ hallucinate a document count.
 | `agent/mailer.py` | Gmail OAuth, reading, MIME assembly, sending |
 | `agent/parser.py` | Request interpretation (Gemini + fallback) |
 | `agent/reply.py` | Deterministic reply and error templates |
-| `agent/packager.py` | ZIP creation and verification |
+| `agent/packager.py` | ZIP creation, size-aware splitting, verification |
 | `agent/cli.py` | Terminal entry point; runs the scrape without Gmail |
 
 ## Setup
@@ -109,6 +109,19 @@ Run just the scrape, no Gmail involved:
 
 ```bash
 .venv/Scripts/python.exe agent/cli.py M12205 "Other Documents"
+.venv/Scripts/python.exe agent/cli.py M12205 "Other Documents" --dry-run  # metadata only
+```
+
+Run the tests (offline -- no network, Gmail or browser):
+
+```bash
+.venv/Scripts/python.exe -m pytest tests -q
+```
+
+Compare the two parsers side by side (used in the demo):
+
+```bash
+.venv/Scripts/python.exe demo_parser.py
 ```
 
 Inspect the mailbox:
@@ -133,10 +146,17 @@ modal containing a button labelled with the real filename, and clicking *that* s
 transfer. Each download is guarded so the modal's filename must correspond to the table
 row that was clicked -- a desync fails loudly rather than silently saving the wrong file.
 
-**Layout differs per tab.** Most tabs identify rows by document number (`102674`), but
-Exhibits uses exhibit labels (`A-1`, and the live data contains `A -5` with a stray
-space). The `Found Count` label only renders when the list overflows, so tab-readiness is
-detected by waiting for rows rather than for that label.
+**Layout differs per tab.** Most tabs identify rows by document number (`102674`),
+Exhibits uses exhibit labels (`H-4(C)-iii`, and the live data contains `A -5` with a
+stray space), and Recordings uses a date. These vary too much to pattern-match, so rows
+are identified by layout instead. The `Found Count` label only renders when the list
+overflows, so tab-readiness waits on rows rather than on that label.
+
+**Recordings download differently again.** Container fields open an *Export Field to File*
+dialog first -- a filename box and an OK button -- and only then the usual download modal.
+The dialog pre-fills the correct name (`M 12400.MP3`), so the agent accepts that default
+rather than inventing one. This makes Recordings a three-click sequence where every other
+tab takes two.
 
 ## Why both parsers
 
@@ -155,6 +175,15 @@ rather than a guess.
 ## Behaviour
 
 - **All five category counts** are reported on every reply, not just the requested one.
+- **Ambiguous requests are questioned, not guessed.** An email naming two matters or two
+  document types gets a reply listing the options and asking which was meant. Gemini
+  distinguishes real ambiguity from a type that is merely mentioned in passing, such as a
+  negation ("everything that isn't exhibits") or a quoted reply chain.
+- **The reply reads as prose, with a manifest.** A short summary of the matter, the counts
+  in a sentence, then the documents listed by number and title so the archive does not have
+  to be opened to see what arrived.
+- **Oversize archives are split, not refused.** As many documents as fit under the limit are
+  attached and the rest named in the reply.
 - **Nothing is hardcoded.** Counts, metadata and titles are extracted per request. Live
   counts already differ from the assignment's examples because the board keeps filing.
 - **Spam is polled deliberately.** A new Gmail account files first-contact mail as spam,
@@ -167,16 +196,22 @@ rather than a guess.
   it to be retried rather than silently dropped.
 - **Failures are per-document.** One bad download does not abandon the other nine; the
   reply reports how many succeeded.
+- **Requests are retried, but not forever.** A crashed browser or a site timeout leaves the
+  message unread so the next poll retries it; after three failures the sender is told the
+  lookup failed rather than being left waiting indefinitely.
 
 ## Limitations
 
+- **Transcripts are untested.** No matter among the 22 sampled had any. They are container
+  fields like Recordings and so take the same export path, which is tested, but that is
+  inference rather than evidence.
 - **Maximum ~12 documents per request.** The document table is virtualised and renders
   about 12 rows at a time; the 10-document requirement never hits this, but a larger
   request would need scroll handling.
 - **Attachments are capped at 17MB.** Gmail rejects messages over 25MB and base64 inflates
   attachments by roughly a third. Some matters hold very large filings -- ten Exhibits from
-  M12205 come to 117MB -- and those exceed what email can carry. The agent still replies with
-  the full summary and counts, and explains that the archive was too large to attach.
+  M12205 come to 117MB. The agent attaches as many as fit and names the rest in the reply,
+  so a request is never silently dropped, but very large documents cannot be emailed.
 - **OAuth tokens expire after 7 days.** The consent screen uses restricted Gmail scopes and
   stays in *Testing* status, for which Google expires refresh tokens weekly. Re-run
   `agent/mailer.py auth` to restore access; publishing to production would require Google
@@ -202,5 +237,11 @@ Verified against the live site and live Gmail:
 | Malformed matter numbers | rejected before any browser launch |
 | Unparseable request | reply explaining the expected format |
 | M12205 / Exhibits (13 available) | capped at 10, incl. `H-4(C)-iii` style labels |
+| M12400 / Recordings | 22MB MP3 via the export dialog, valid audio |
 | Oversize archive (117MB) | replies with summary, explains the omission |
 | Bounce / no-reply sender | ignored, no reply |
+| Ambiguous request | asks which matter or type was meant |
+| Oversize archive (117MB) | 6 attached, 4 named as too large |
+
+77 offline tests cover the parser, reply formatting, packaging, mail handling and the
+scraper's pure logic, including a regression test for every bug found during development.

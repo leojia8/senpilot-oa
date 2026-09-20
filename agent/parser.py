@@ -37,7 +37,12 @@ The matter number is the letter M followed by exactly 5 digits.
 The document type must be exactly one of: Exhibits, Key Documents, Other Documents, \
 Transcripts, Recordings.
 
-If either value is missing or ambiguous, return null for it. Do not guess.
+If either value is missing, return null for it. Do not guess.
+
+Set "ambiguous" to true only when the email genuinely asks for more than one matter
+or more than one document type and there is no single clear intent. A request that
+mentions a type only to exclude it (for example "everything that isn't exhibits")
+is NOT ambiguous -- resolve it to the type actually wanted.
 
 Email:
 ---
@@ -53,13 +58,54 @@ SCHEMA = {
             "enum": CATEGORIES,
             "nullable": True,
         },
+        "ambiguous": {"type": "boolean"},
     },
-    "required": ["matter_number", "document_type"],
+    "required": ["matter_number", "document_type", "ambiguous"],
 }
 
 
 class ParseError(Exception):
     """The email did not contain a usable request."""
+
+
+class AmbiguousRequest(Exception):
+    """The email named more than one matter or document type."""
+
+    def __init__(self, matters, categories):
+        self.matters = matters
+        self.categories = categories
+        super().__init__("ambiguous request")
+
+
+# Everything below a reply marker or signature belongs to an earlier message and
+# must not be mistaken for part of the request.
+QUOTE_MARKERS = re.compile(
+    r"^\s*(>|On .{0,80}\bwrote:|-{2,}\s*Original Message|From:\s|Sent from )",
+    re.IGNORECASE | re.MULTILINE)
+SIGNATURE = re.compile(r"^--\s*$", re.MULTILINE)
+
+
+def strip_quoted(text):
+    """Drop quoted reply chains and signatures."""
+    t = _clean(text)
+    m = SIGNATURE.search(t)
+    if m:
+        t = t[:m.start()]
+    lines, kept = t.splitlines(), []
+    for line in lines:
+        if QUOTE_MARKERS.match(line):
+            break
+        kept.append(line)
+    return "\n".join(kept) if kept else t
+
+
+def find_candidates(text):
+    """Every distinct matter number and category the text mentions."""
+    t = _clean(text)
+    low = t.lower()
+    matters = list(dict.fromkeys(f"M{m.group(1)}" for m in MATTER_IN_TEXT.finditer(t)))
+    cats = [canon for canon, keys in ALIASES.items() if any(k in low for k in keys)]
+    return matters, cats
 
 
 def _normalise_matter(value):
@@ -82,9 +128,20 @@ def _normalise_category(value):
     return None
 
 
+def _clean(text):
+    """Normalise whitespace so HTML-sourced bodies parse like plain ones.
+
+    A category name split by a non-breaking space ("Other&nbsp;Documents")
+    would otherwise fail to match any alias.
+    """
+    t = (text or "").replace("&nbsp;", " ").replace("\xa0", " ")
+    return re.sub(r"[ \t]+", " ", t)
+
+
 def fallback_parse(text):
     """Regex/keyword extraction. Used when Gemini is unavailable."""
-    low = (text or "").lower()
+    text = _clean(text)
+    low = text.lower()
 
     matter = None
     m = MATTER_IN_TEXT.search(text or "")
@@ -133,7 +190,8 @@ def gemini_parse(text, api_key=None):
         ),
     )
     data = json.loads(resp.text)
-    return data.get("matter_number"), data.get("document_type")
+    return (data.get("matter_number"), data.get("document_type"),
+            bool(data.get("ambiguous")))
 
 
 def parse_request(text, api_key=None):
@@ -142,17 +200,32 @@ def parse_request(text, api_key=None):
     Tries Gemini, falls back to regex, and raises ParseError with a
     human-readable reason if either field cannot be resolved.
     """
+    text = strip_quoted(text)
     matter = category = None
+    resolved_by_gemini = False
+
     if gemini_enabled(api_key):
         try:
-            matter, category = gemini_parse(text, api_key)
+            matter, category, ambiguous = gemini_parse(text, api_key)
+            if ambiguous:
+                raise AmbiguousRequest(*find_candidates(text))
+            resolved_by_gemini = True
+        except AmbiguousRequest:
+            raise
         except Exception:
-            pass  # fall through to the deterministic path
+            matter = category = None  # fall through to the deterministic path
 
     matter = _normalise_matter(matter)
     category = _normalise_category(category)
 
     if not matter or not category:
+        # Gemini can reason past a type that is merely mentioned (a negation, a
+        # quoted thread). The deterministic parser cannot, so when it is doing
+        # the work, refuse to guess between genuinely competing options.
+        if not resolved_by_gemini:
+            matters, cats = find_candidates(text)
+            if len(matters) > 1 or len(cats) > 1:
+                raise AmbiguousRequest(matters, cats)
         fb_matter, fb_category = fallback_parse(text)
         matter = matter or fb_matter
         category = category or fb_category

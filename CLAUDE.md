@@ -119,6 +119,13 @@ $69,275,000 (assignment example said 13 / 5 / 21 / 0 / 0 and $69,270,000). Extra
   the upper of the two. An earlier regex approach silently mismatched rows.
 - Modal filenames also contain brackets (`H-4(C).pdf`), so `MODAL_FILE_JS` matches on having
   a plausible extension, not on an allow-list of characters.
+- **Recordings (and presumably Transcripts) are container fields** and open an
+  `Export Field to File` dialog before the download modal: a real `<input.v-textfield>`
+  (the only genuine input on the site) pre-filled with the correct name, plus an OK
+  button. Accept the default filename; overwriting it loses the extension. The row/modal
+  guard is skipped here, since the filename comes from the server and the Recordings tab's
+  left column is a date.
+- Transcripts/Recordings are rare: only 1 of 22 sampled matters had any (M12400, 1 recording).
 - **Archives can hugely exceed email limits** -- 10 Exhibits from M12205 zip to 117MB. The
   orchestrator replies and explains rather than failing the send, which would otherwise leave
   the message unread and retried forever.
@@ -152,6 +159,11 @@ The free tier allows roughly 20 requests/day, so `GEMINI_MODE` gates the API:
 `mock` (default, never calls), `live` (always), `auto` (live only when a key is set).
 The regex/keyword fallback in `agent/parser.py` passes every parser test on its own, so
 `mock` is fully functional -- flip to `live` only for the demo.
+
+## Testing
+
+`pytest tests -q` -- 77 offline tests, no network, Gmail or browser. Every bug found during
+development has a regression test marked `REGRESSION`. Run this before any commit.
 
 ## Environment
 `python` is **not** on PATH on this machine, and `py -3.13` is a broken Microsoft Store stub.
