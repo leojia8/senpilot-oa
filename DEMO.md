@@ -15,7 +15,7 @@ and honest failure handling.
 
 # 3. clear the decks
 rm -rf output
-```
+``` 
 
 Have open and ready:
 - A terminal, large font

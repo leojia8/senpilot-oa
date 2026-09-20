@@ -56,13 +56,24 @@ def get_service(credentials_file=None, token_file=None):
         if creds and creds.expired and creds.refresh_token:
             creds.refresh(Request())
         else:
+            # On a server there is no browser to complete the consent flow, and
+            # run_local_server would block until the job timed out.
+            if os.environ.get("NON_INTERACTIVE"):
+                raise RuntimeError(
+                    "no usable token and NON_INTERACTIVE is set -- the stored "
+                    "refresh token is missing or revoked. Re-run "
+                    "'python agent/mailer.py auth' locally and update the "
+                    "GMAIL_TOKEN secret.")
             if not Path(credentials_file).exists():
                 raise FileNotFoundError(
                     f"{credentials_file} not found -- download the desktop OAuth "
                     "client secret from Google Cloud Console and save it there")
             flow = InstalledAppFlow.from_client_secrets_file(credentials_file, SCOPES)
             creds = flow.run_local_server(port=0)
-        Path(token_file).write_text(creds.to_json(), encoding="utf-8")
+        try:
+            Path(token_file).write_text(creds.to_json(), encoding="utf-8")
+        except OSError:
+            pass  # read-only filesystem; the refresh token in the secret still works
 
     return build("gmail", "v1", credentials=creds)
 

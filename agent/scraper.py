@@ -5,11 +5,21 @@ WebDirect renders everything as <div>s driven by Vaadin/GWT -- there are no <inp
 rather than filled, and page.content() returns a stale shell that must not be used.
 Selectors below were verified against the live site; see CLAUDE.md.
 """
+import os
 import re
 import time
 from pathlib import Path
 
 from playwright.sync_api import sync_playwright
+
+# Every wait below was tuned on a developer laptop. A slower or more distant
+# host (a CI runner, a small VM) needs longer, so TIMING_SCALE stretches all of
+# them at once rather than requiring each to be retuned.
+SCALE = float(os.environ.get("TIMING_SCALE") or 1)
+
+
+def _ms(value):
+    return int(value * SCALE)
 
 URL = "https://uarb.novascotia.ca/fmi/webd/UARB15"
 
@@ -45,21 +55,22 @@ def new_page(pw, headless=False):
 def open_matter(page, matter, timeout=45):
     """Search for a matter number and land on its detail page."""
     matter = validate_matter(matter)
-    page.goto(URL, timeout=60000, wait_until="domcontentloaded")
-    page.wait_for_selector(MATTER_FIELD, timeout=60000)
+    page.goto(URL, timeout=_ms(60000), wait_until="domcontentloaded")
+    page.wait_for_selector(MATTER_FIELD, timeout=_ms(60000))
 
     page.locator(MATTER_FIELD).click()
-    page.wait_for_timeout(800)
+    page.wait_for_timeout(_ms(800))
     page.keyboard.type(matter, delay=100)
-    page.wait_for_timeout(500)
+    page.wait_for_timeout(_ms(500))
     page.click(SEARCH_BUTTON)
+    timeout = timeout * SCALE
 
     # An unknown matter leaves us on the search screen with an error dialog, so
     # race the tab bar against a modal that sticks around.
     deadline, modal_seen = time.monotonic() + timeout, 0
     while time.monotonic() < deadline:
         if TAB_BAR_RE.search(page.evaluate("() => document.body.innerText")):
-            page.wait_for_timeout(1500)
+            page.wait_for_timeout(_ms(1500))
             return matter
         if page.locator(MODAL).count():
             modal_seen += 1
@@ -68,7 +79,7 @@ def open_matter(page, matter, timeout=45):
                 raise MatterNotFound(f"{matter}: {note[:150]}")
         else:
             modal_seen = 0
-        page.wait_for_timeout(1000)
+        page.wait_for_timeout(_ms(1000))
     raise MatterNotFound(f"{matter}: matter page did not load within {timeout}s")
 
 
@@ -134,8 +145,8 @@ def select_category(page, category):
         return 0
     page.get_by_text(f"{category} - ", exact=False).first.click()
     # "Found Count" only renders when the list overflows, so wait on the rows.
-    page.wait_for_function(HAS_ROWS_JS, timeout=60000)
-    page.wait_for_timeout(2500)
+    page.wait_for_function(HAS_ROWS_JS, timeout=_ms(60000))
+    page.wait_for_timeout(_ms(2500))
     return count
 
 
@@ -188,14 +199,14 @@ def _norm(s):
 DATE_LIKE = re.compile(r"^\d{1,2}/\d{1,2}/\d{2,4}$")
 
 
-def _await_modal_filename(page, timeout=30000):
+def _await_modal_filename(page, timeout=_ms(30000)):
     """Poll for the download modal's filename button."""
     deadline = time.monotonic() + timeout / 1000
     while time.monotonic() < deadline:
         name = page.evaluate(MODAL_FILE_JS)
         if name:
             return name
-        page.wait_for_timeout(500)
+        page.wait_for_timeout(_ms(500))
     return None
 
 
@@ -209,7 +220,7 @@ def _handle_export_dialog(page):
     if not field.count():
         return False
     page.locator(MODAL).locator("div.v-button").filter(has_text="OK").first.click()
-    page.wait_for_timeout(1500)
+    page.wait_for_timeout(_ms(1500))
     return True
 
 
@@ -227,7 +238,7 @@ def _close_modal(page):
     try:
         if page.locator(MODAL).count():
             page.locator(MODAL).get_by_text("Close", exact=True).first.click()
-            page.wait_for_timeout(800)
+            page.wait_for_timeout(_ms(800))
     except Exception:
         pass
 
@@ -249,7 +260,7 @@ def download_documents(page, dest, max_docs=10, log=print):
         label = row["doc_no"] or f"row{row['index']}"
         try:
             page.get_by_text("GO GET IT", exact=False).nth(row["index"]).click()
-            page.wait_for_selector(MODAL, state="visible", timeout=30000)
+            page.wait_for_selector(MODAL, state="visible", timeout=_ms(30000))
             exported = _handle_export_dialog(page)
             name = _await_modal_filename(page)
             if not name:
@@ -263,7 +274,7 @@ def download_documents(page, dest, max_docs=10, log=print):
             if ident and not exported and not DATE_LIKE.match(ident):
                 if not _norm(name).startswith(_norm(ident)):
                     raise RuntimeError(f"row/modal mismatch: row {ident} -> {name}")
-            with page.expect_download(timeout=60000) as dl:
+            with page.expect_download(timeout=_ms(60000)) as dl:
                 page.locator(MODAL).get_by_text(name, exact=True).first.click()
             path = _unique(dest, name)
             dl.value.save_as(str(path))

@@ -1,0 +1,82 @@
+name: NSUARB agent
+
+# Runs the agent on a schedule so it answers email without a laptop being on.
+# A single pass polls Gmail, fulfils any requests, and exits -- the job is
+# stateless because only the OAuth refresh token needs to persist, and that
+# lives in repository secrets.
+
+on:
+  schedule:
+    # Every 10 minutes. GitHub queues scheduled runs and may delay them under
+    # load, so treat this as "within ~10-20 minutes", not as a hard interval.
+    - cron: "*/10 * * * *"
+  workflow_dispatch:
+    inputs:
+      timing_scale:
+        description: "Stretch all browser waits by this factor"
+        required: false
+        default: "2.0"
+
+concurrency:
+  # Never let two runs process the same message at once.
+  group: nsuarb-agent
+  cancel-in-progress: false
+
+jobs:
+  poll:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    env:
+      NON_INTERACTIVE: "1"
+      HEADLESS: "true"
+      MAX_DOCUMENTS: "10"
+      # CI runners are further from the board's site than a local machine, so
+      # every wait in the scraper is stretched.
+      TIMING_SCALE: ${{ github.event.inputs.timing_scale || '2.0' }}
+      GEMINI_MODE: ${{ vars.GEMINI_MODE || 'mock' }}
+      GEMINI_MODEL: ${{ vars.GEMINI_MODEL || 'gemini-2.0-flash' }}
+      GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+      GMAIL_CREDENTIALS_FILE: credentials.json
+      GMAIL_TOKEN_FILE: token.json
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Cache Playwright browsers
+        uses: actions/cache@v4
+        id: playwright-cache
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('requirements.txt') }}
+
+      - name: Install Chromium
+        run: playwright install --with-deps chromium
+
+      - name: Write credentials
+        env:
+          GMAIL_CREDENTIALS: ${{ secrets.GMAIL_CREDENTIALS }}
+          GMAIL_TOKEN: ${{ secrets.GMAIL_TOKEN }}
+        run: |
+          if [ -z "$GMAIL_CREDENTIALS" ] || [ -z "$GMAIL_TOKEN" ]; then
+            echo "::error::GMAIL_CREDENTIALS and GMAIL_TOKEN secrets must be set"
+            exit 1
+          fi
+          printf '%s' "$GMAIL_CREDENTIALS" > credentials.json
+          printf '%s' "$GMAIL_TOKEN" > token.json
+          python -c "import json;json.load(open('credentials.json'));json.load(open('token.json'));print('credentials parsed ok')"
+
+      - name: Run one polling pass
+        run: python agent/main.py --once
+
+      - name: Remove credentials
+        if: always()
+        run: rm -f credentials.json token.json
