@@ -93,11 +93,22 @@ def handle(service, msg_id, agent_address):
             verify_zip(zip_path, files)
             log(f"  zipped {len(files)} file(s) -> {zip_path.stat().st_size:,} bytes")
 
+        # Some matters hold filings of tens of MB each. If the archive is too
+        # big to email, still reply and explain, rather than failing the send
+        # and retrying the whole request forever.
+        oversize = None
+        if zip_path and zip_path.stat().st_size > mailer.MAX_ATTACHMENT_BYTES:
+            oversize = zip_path.stat().st_size
+            log(f"  archive is {oversize:,} bytes -- too large to attach")
+
         subject, body = format_reply(info, category, len(files), failed,
-                                     zip_path.name if zip_path else None, MAX_DOCUMENTS)
-        mailer.send_reply(service, sender, subject, body, attachment=zip_path,
+                                     zip_path.name if zip_path and not oversize else None,
+                                     MAX_DOCUMENTS, oversize)
+        mailer.send_reply(service, sender, subject, body,
+                          attachment=None if oversize else zip_path,
                           thread_id=msg["thread_id"], in_reply_to=msg["message_id"])
-        log(f"  replied to {sender} with {len(files)} document(s)")
+        log(f"  replied to {sender} with {len(files)} document(s)"
+            + (" (archive too large to attach)" if oversize else ""))
         return True
     finally:
         shutil.rmtree(workdir, ignore_errors=True)

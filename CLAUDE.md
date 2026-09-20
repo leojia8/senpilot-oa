@@ -112,9 +112,16 @@ $69,275,000 (assignment example said 13 / 5 / 21 / 0 / 0 and $69,270,000). Extra
   by position (the widest `div.v-label` in the header band).
 - `Found Count: N` renders **only when the list overflows**. Do not gate tab-ready on it;
   gate on `GO GET IT` rows existing.
-- Row identifiers differ per tab: **doc numbers** (`102674`) on most tabs, **exhibit labels**
-  (`A-1`, and real data contains `A -5`) on Exhibits. `ROWS_JS` matches both and must not
-  match the Security column (`Public`).
+- Row identifiers vary too much to pattern-match: doc numbers (`102674`) on most tabs, and
+  on Exhibits `H-1`, `H-4(C)`, `H-4(C)-iii`, `H-5(c)-ii`, plus `A -5` with a stray space.
+  **Do not regex them.** `ROWS_JS` matches on layout: the identifier and the Security value
+  share the leftmost column (x < 100, which excludes titles at x~115) and the identifier is
+  the upper of the two. An earlier regex approach silently mismatched rows.
+- Modal filenames also contain brackets (`H-4(C).pdf`), so `MODAL_FILE_JS` matches on having
+  a plausible extension, not on an allow-list of characters.
+- **Archives can hugely exceed email limits** -- 10 Exhibits from M12205 zip to 117MB. The
+  orchestrator replies and explains rather than failing the send, which would otherwise leave
+  the message unread and retried forever.
 - Each download is guarded: the modal filename must correspond to the row clicked, so a
   row/modal desync fails loudly instead of silently saving the wrong file.
 - Unknown matter (e.g. M99999) → site modal "No Records Found"; raised as `MatterNotFound`

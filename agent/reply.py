@@ -6,7 +6,8 @@ def _line(label, value):
     return f"  {label:<16}{value if value not in (None, '') else '-'}"
 
 
-def format_reply(info, category, downloaded, failed=(), zip_name=None, max_docs=10):
+def format_reply(info, category, downloaded, failed=(), zip_name=None, max_docs=10,
+                 oversize=None):
     """Build (subject, body) for a successful lookup."""
     counts = info.get("counts", {})
     available = counts.get(category) or 0
@@ -44,6 +45,15 @@ def format_reply(info, category, downloaded, failed=(), zip_name=None, max_docs=
             lines.append(_line("Failed", f"{len(failed)} ({', '.join(map(str, failed))})"))
         if zip_name:
             lines.append(_line("Attached", zip_name))
+        if oversize:
+            mb = oversize / (1024 * 1024)
+            lines += [
+                "",
+                f"  The archive for these documents is {mb:.1f} MB, which exceeds what",
+                "  email can carry, so it is not attached. Some filings on this matter",
+                "  are very large. Requesting a different document type, or retrieving",
+                "  these few documents directly from the board's site, will work better.",
+            ]
 
     lines += ["", "-- ", "NSUARB document agent"]
     return subject, "\n".join(lines)

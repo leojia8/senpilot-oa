@@ -144,20 +144,20 @@ def select_category(page, category):
 ROWS_JS = """() => {
   const ggi = [...document.querySelectorAll('*')]
     .filter(e => e.children.length === 0 && /GO GET IT/i.test(e.textContent));
-  // Row identifiers are doc numbers on most tabs but exhibit labels ("A-1",
-  // and real data contains "A -5") on Exhibits. Security ("Public") must not match.
-  const idRe = /^(\\d+|[A-Za-z]\\s*-\\s*\\d+[A-Za-z]?)$/;
-  const nums = [...document.querySelectorAll('div.text')].filter(d => {
+  // Identifiers vary far too much to pattern-match: doc numbers ("102674") on
+  // most tabs, but exhibit labels on Exhibits -- "H-1", "H-4(C)", "H-4(C)-iii",
+  // and real data contains "A -5" with a stray space. So match on layout
+  // instead: the identifier and the Security value share the leftmost column,
+  // with the identifier sitting just above it. Titles are further right, so the
+  // x bound must stay tight enough to exclude them.
+  const left = [...document.querySelectorAll('div.text')].map(d => {
     const r = d.getBoundingClientRect();
-    return r.x < 140 && idRe.test((d.textContent || '').trim());
-  });
+    return {t: (d.textContent || '').trim(), x: r.x, y: r.y + r.height / 2};
+  }).filter(o => o.t && o.x < 100);
   return ggi.map((e, i) => {
     const r = e.getBoundingClientRect(), y = r.y + r.height / 2;
-    const hit = nums.find(d => {
-      const dr = d.getBoundingClientRect();
-      return Math.abs(dr.y + dr.height / 2 - y) < 40;
-    });
-    return {index: i, doc_no: hit ? hit.textContent.trim() : null, y: Math.round(y)};
+    const c = left.filter(o => Math.abs(o.y - y) < 40).sort((a, b) => a.y - b.y);
+    return {index: i, doc_no: c.length ? c[0].t : null, y: Math.round(y)};
   });
 }"""
 
@@ -165,12 +165,18 @@ ROWS_JS = """() => {
 MODAL_FILE_JS = """() => {
   const w = document.querySelector('.v-window.fm-modal-dialog');
   if (!w) return null;
+  // Filenames contain brackets and spaces ("H-4(C).pdf"), so match on having a
+  // plausible extension rather than on an allow-list of characters.
   const t = [...w.querySelectorAll('*')]
     .filter(e => e.children.length === 0)
     .map(e => (e.textContent || '').trim())
-    .filter(s => /^[\\w.\\- ]+\\.[A-Za-z0-9]{2,5}$/.test(s) && s !== 'Close');
+    .filter(s => s && s !== 'Close' && s.length <= 150 && /\\.[A-Za-z0-9]{2,5}$/.test(s));
   return t.length ? t[0] : null;
 }"""
+
+
+def _norm(s):
+    return re.sub(r"\s+", "", (s or "")).lower()
 
 
 def _unique(dest, name):
@@ -212,7 +218,9 @@ def download_documents(page, dest, max_docs=10, log=print):
             if not name:
                 raise RuntimeError("no filename button in modal")
             # The modal must offer the file from the row we actually clicked.
-            if row["doc_no"] and not name.startswith(row["doc_no"]):
+            # Compare loosely: case and stray spaces differ between the two
+            # ("A -5" in the table becomes "A -5.pdf", "H-5(c)-ii" may re-case).
+            if row["doc_no"] and not _norm(name).startswith(_norm(row["doc_no"])):
                 raise RuntimeError(f"row/modal mismatch: row {row['doc_no']} -> {name}")
             with page.expect_download(timeout=60000) as dl:
                 page.locator(MODAL).get_by_text(name, exact=True).first.click()

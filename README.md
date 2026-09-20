@@ -174,7 +174,13 @@ rather than a guess.
   about 12 rows at a time; the 10-document requirement never hits this, but a larger
   request would need scroll handling.
 - **Attachments are capped at 17MB.** Gmail rejects messages over 25MB and base64 inflates
-  attachments by roughly a third. Ten large PDFs can approach this.
+  attachments by roughly a third. Some matters hold very large filings -- ten Exhibits from
+  M12205 come to 117MB -- and those exceed what email can carry. The agent still replies with
+  the full summary and counts, and explains that the archive was too large to attach.
+- **OAuth tokens expire after 7 days.** The consent screen uses restricted Gmail scopes and
+  stays in *Testing* status, for which Google expires refresh tokens weekly. Re-run
+  `agent/mailer.py auth` to restore access; publishing to production would require Google
+  verification.
 - **The agent runs only while its host does.** It polls from wherever it is started; there
   is no hosted deployment.
 - **Documents are fetched fresh every request.** There is no caching, so repeat requests
@@ -195,4 +201,6 @@ Verified against the live site and live Gmail:
 | M99999 (nonexistent) | clean error in ~10s |
 | Malformed matter numbers | rejected before any browser launch |
 | Unparseable request | reply explaining the expected format |
+| M12205 / Exhibits (13 available) | capped at 10, incl. `H-4(C)-iii` style labels |
+| Oversize archive (117MB) | replies with summary, explains the omission |
 | Bounce / no-reply sender | ignored, no reply |
