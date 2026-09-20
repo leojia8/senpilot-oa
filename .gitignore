@@ -1,0 +1,25 @@
+# Secrets — never commit
+.env
+credentials.json
+token.json
+*.pem
+
+# Runtime artifacts
+downloads/
+output/
+tmp/
+*.zip
+
+# Python
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+
+# Editors / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
