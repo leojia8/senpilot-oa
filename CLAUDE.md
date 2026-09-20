@@ -168,10 +168,11 @@ Use the venv binaries directly:
 8. ✅ Gemini request parsing — `agent/parser.py`, with a regex/keyword fallback that works
    with no API key at all. Invalid/incomplete requests raise `ParseError`.
 9. ✅ Orchestrator — `agent/main.py`; all six routing branches tested with stubs.
-10. ⬜ Live end-to-end test — next step.
+10. ✅ Live end-to-end — real inbound email from leo8.jia@gmail.com parsed by live Gemini
+    (`gemini-3.5-flash-lite`) → M12383 / Key Documents → 4 docs → ZIP → threaded reply, 24s.
 11. *If time remains:* reliability, optional background-worker deployment. Never at the
     expense of core functionality.
-12. README (architecture, setup, usage, completed features, limitations). Leo records the
+12. ✅ README written. Leo records the
     Loom and submits.
 
 ## How to work on this
