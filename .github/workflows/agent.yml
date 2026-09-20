@@ -7,9 +7,10 @@ name: NSUARB agent
 
 on:
   schedule:
-    # Every 10 minutes. GitHub queues scheduled runs and may delay them under
-    # load, so treat this as "within ~10-20 minutes", not as a hard interval.
-    - cron: "*/10 * * * *"
+    # Every 5 minutes, which is the most frequent schedule GitHub allows.
+    # Runs are queued and may be delayed under load, so treat this as "within
+    # roughly 5-20 minutes" rather than as a hard interval.
+    - cron: "*/5 * * * *"
   workflow_dispatch:
     inputs:
       timing_scale:
