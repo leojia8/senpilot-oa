@@ -405,3 +405,35 @@ def test_singular_grammar(tmp_path):
 def test_plural_grammar(tmp_path):
     _, body = replymod.format_reply(INFO, "Exhibits", docs(tmp_path, 3), [], "a.zip")
     assert "attached them as a ZIP" in " ".join(body.split())
+
+
+# ------------------------------------------------------------ startup retries
+def test_connect_retries_then_succeeds(monkeypatch):
+    """REGRESSION: a transient Gmail error at startup failed the whole run."""
+    import main
+    calls = {"n": 0}
+
+    def flaky():
+        calls["n"] += 1
+        if calls["n"] < 3:
+            raise ConnectionError("transient")
+        return "service"
+
+    monkeypatch.setattr(main.mailer, "get_service", flaky)
+    monkeypatch.setattr(main.mailer, "get_address", lambda s: "agent@gmail.com")
+    monkeypatch.setattr(main.time, "sleep", lambda n: None)
+    assert main.connect(retries=3, delay=0) == ("service", "agent@gmail.com")
+    assert calls["n"] == 3
+
+
+def test_connect_gives_up_and_raises(monkeypatch):
+    """A revoked token must still fail loudly rather than retry forever."""
+    import main
+
+    def always_fail():
+        raise RuntimeError("invalid_grant")
+
+    monkeypatch.setattr(main.mailer, "get_service", always_fail)
+    monkeypatch.setattr(main.time, "sleep", lambda n: None)
+    with pytest.raises(RuntimeError):
+        main.connect(retries=3, delay=0)

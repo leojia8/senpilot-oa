@@ -140,9 +140,30 @@ def notify_failure(service, msg_id, error):
                       thread_id=msg["thread_id"], in_reply_to=msg["message_id"])
 
 
+def connect(retries=3, delay=5):
+    """Authorise and identify ourselves, tolerating a transient hiccup.
+
+    These are the only unguarded network calls in the run: everything inside the
+    polling loop is caught and logged. A momentary Google error here would
+    otherwise fail the whole job, which on a scheduled deployment shows up as a
+    red run for no real reason.
+    """
+    for attempt in range(1, retries + 1):
+        try:
+            service = mailer.get_service()
+            return service, mailer.get_address(service)
+        except Exception as e:
+            if attempt == retries:
+                log(f"could not reach Gmail after {retries} attempts: "
+                    f"{type(e).__name__}: {e}")
+                raise
+            log(f"startup attempt {attempt}/{retries} failed "
+                f"({type(e).__name__}); retrying in {delay}s")
+            time.sleep(delay)
+
+
 def main():
-    service = mailer.get_service()
-    agent_address = mailer.get_address(service)
+    service, agent_address = connect()
     once = "--once" in sys.argv
     log(f"agent ready as {agent_address} (poll {POLL_SECONDS}s, max {MAX_DOCUMENTS} docs)")
 
