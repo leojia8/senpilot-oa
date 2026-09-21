@@ -1,8 +1,12 @@
 # Loom demo script (5 minutes)
 
 Target: **4:30**, leaving buffer. The goal is to show the agent working and then show the
-three things that make it more than a scraper: the two-step download, the parser pairing,
-and honest failure handling.
+four things that make it more than a scraper: the two-step download, the parser pairing,
+asking instead of guessing, and honest failure handling.
+
+**Run the agent locally during filming.** The deployed version polls on a schedule, which
+would mean waiting minutes on camera. `--once` checks immediately. Same code either way --
+only the trigger differs.
 
 ## Before recording
 
@@ -13,14 +17,21 @@ and honest failure handling.
 # 2. warm the browser cache so the first run is not slow
 .venv/Scripts/python.exe agent/cli.py M12383 "Key Documents"
 
-# 3. clear the decks
+# 3. confirm the tests are green (you may want to show this)
+.venv/Scripts/python.exe -m pytest tests -q
+
+# 4. clear the decks
 rm -rf output
-``` 
+```
+
+Optional but safest: disable the scheduled workflow while filming (Actions -> NSUARB agent
+-> ... -> Disable workflow) so a scheduled run cannot answer your demo email first. Re-enable
+afterwards. Low risk either way, since you send and run within seconds.   
 
 Have open and ready:
 - A terminal, large font
 - Gmail as **your own account**, composing to `senpilot.oa.agent@gmail.com`
-- The repo on GitHub
+- The repo on GitHub, plus its **Actions** tab showing a green run
 - `https://uarb.novascotia.ca/fmi/webd/UARB15` in a browser tab
 
 Pre-send nothing. The live arrival is the demo.
@@ -137,19 +148,28 @@ Pick two or three:
   silently without a reply."
 - **Per-document failures** - one bad download doesn't abandon the other nine.
 
-## 4:05 - 4:30 · What I'd do next, and close
+## 4:05 - 4:30 · Deployment, limits, close
+
+Show the **Actions** tab with a green run.
+
+> "I ran it by hand just now so we weren't waiting on camera, but it's also deployed on
+> GitHub Actions. It polls every five minutes, so reviewers can email it with my laptop
+> shut. Each run spins up a container, checks the inbox, and exits - it's stateless, so
+> only the OAuth refresh token has to persist.
+>
+> Known limits: replies take five to twenty minutes when it runs on a schedule rather than
+> locally. Archives over 17MB can't be attached, so it sends as many documents as fit and
+> names the rest. And Transcripts I never got to test - only one of the twenty-two matters
+> I sampled had any recordings, and none had transcripts.
+>
+> With more time: cache documents between requests, and move it to a long-running worker
+> so replies are immediate.
+>
+> One last thing - the counts you just saw don't match the assignment's example. The board
+> has kept filing since it was written. Nothing here is hardcoded; it all comes off the
+> live page."
 
 Optionally show `pytest tests -q` passing - 77 offline tests, one for every bug found.
-
-> "Known limits: it runs while my machine does, so there's no hosted deployment. Archives
-> over 17MB can't be attached. And Transcripts I never got to test, because only one matter
-> in the twenty-two I sampled had any recordings at all and none had transcripts.
->
-> With more time: host it as a worker, and cache documents between requests.
->
-> One thing worth saying - the counts you just saw don't match the assignment's example.
-> The board has kept filing since it was written. Nothing here is hardcoded; it all comes
-> off the live page."
 
 ---
 
@@ -162,4 +182,5 @@ ago"* and cut to a pre-recorded successful run. **Record one before you start.**
 
 1. The 1:50 DevTools segment - describe it instead of demonstrating
 2. Failure examples - keep the spam one, it is the most interesting
-3. The "what I'd do next" list - keep only the honest limitations
+3. The pytest run - mention the number instead of showing it
+4. The "with more time" list - keep the honest limitations, drop the wishlist

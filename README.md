@@ -18,7 +18,7 @@ document counts for all five categories, and a ZIP of up to 10 documents.
 ## How it works
 
 ```
-Gmail inbox (polled every 60s)
+Gmail inbox (polled)
     |
     v
 parse request ................ Gemini structured output, regex/keyword fallback
@@ -200,6 +200,40 @@ rather than a guess.
   message unread so the next poll retries it; after three failures the sender is told the
   lookup failed rather than being left waiting indefinitely.
 
+## Deployment
+
+The agent runs as a scheduled GitHub Actions workflow (`.github/workflows/agent.yml`), so it
+answers email without a machine of its own. Each run boots a fresh container, installs
+Chromium, polls Gmail once, handles anything it finds, and exits. That works because the job
+is effectively stateless -- only the OAuth refresh token has to persist, and it lives in
+repository secrets.
+
+Configure once, under Settings -> Secrets and variables -> Actions:
+
+| Name | Kind | Value |
+|---|---|---|
+| `GMAIL_CREDENTIALS` | secret | contents of `credentials.json` |
+| `GMAIL_TOKEN` | secret | contents of `token.json` |
+| `GEMINI_API_KEY` | secret | Gemini key (optional) |
+| `GEMINI_MODE` | variable | `live` or `mock` (defaults to `mock`) |
+
+Two settings exist for hosts that differ from a developer laptop:
+
+- `TIMING_SCALE` multiplies every browser wait in the scraper, so a slower or more distant
+  host can be accommodated without retuning each timeout individually. CI uses `2.0`, and it
+  is also a `workflow_dispatch` input for re-running a flaky job more patiently.
+- `NON_INTERACTIVE` makes the OAuth flow fail fast with a clear message instead of blocking
+  on a browser that a server does not have.
+
+Runs can also be triggered by hand from the Actions tab, which is the quickest way to check
+the deployment is healthy.
+
+**Scheduling caveats.** Five minutes is the most frequent schedule GitHub permits, and
+scheduled runs are queued and may be delayed under load, so the effective interval is closer
+to 5-20 minutes. Separately, the OAuth consent screen uses restricted Gmail scopes and stays
+in *Testing*, for which Google expires refresh tokens weekly -- when runs start failing
+authentication, re-run `agent/mailer.py auth` locally and update the `GMAIL_TOKEN` secret.
+
 ## Limitations
 
 - **Transcripts are untested.** No matter among the 22 sampled had any. They are container
@@ -214,10 +248,11 @@ rather than a guess.
   so a request is never silently dropped, but very large documents cannot be emailed.
 - **OAuth tokens expire after 7 days.** The consent screen uses restricted Gmail scopes and
   stays in *Testing* status, for which Google expires refresh tokens weekly. Re-run
-  `agent/mailer.py auth` to restore access; publishing to production would require Google
-  verification.
-- **The agent runs only while its host does.** It polls from wherever it is started; there
-  is no hosted deployment.
+  `agent/mailer.py auth` to restore access and update the `GMAIL_TOKEN` secret; publishing to
+  production would require Google verification.
+- **Replies are not instant.** Deployed, the agent polls on a schedule, so a request is
+  answered within roughly 5-20 minutes rather than immediately. Run locally it polls every
+  60 seconds.
 - **Documents are fetched fresh every request.** There is no caching, so repeat requests
   re-download. Typical end-to-end time is 25-45 seconds.
 - **Some matters contain genuinely duplicate PDFs.** M12205 serves byte-identical files

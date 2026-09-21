@@ -189,8 +189,11 @@ Use the venv binaries directly:
 9. ✅ Orchestrator — `agent/main.py`; all six routing branches tested with stubs.
 10. ✅ Live end-to-end — real inbound email from leo8.jia@gmail.com parsed by live Gemini
     (`gemini-3.5-flash-lite`) → M12383 / Key Documents → 4 docs → ZIP → threaded reply, 24s.
-11. *If time remains:* reliability, optional background-worker deployment. Never at the
-    expense of core functionality.
+11. ✅ Deployed as a scheduled GitHub Actions workflow (`.github/workflows/agent.yml`),
+    polling every 5 minutes. Public repo, so Actions minutes are free. `TIMING_SCALE=2.0`
+    stretches the scraper's waits for the runner; `NON_INTERACTIVE=1` stops the OAuth flow
+    blocking on a browser. Credentials live in repository secrets and are deleted after
+    each run.
 12. ✅ README written. Leo records the
     Loom and submits.
 
