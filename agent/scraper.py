@@ -3,7 +3,8 @@
 WebDirect renders everything as <div>s driven by Vaadin/GWT -- there are no <input>,
 <a href> or real <button> elements for fields, so fields are clicked and typed into
 rather than filled, and page.content() returns a stale shell that must not be used.
-Selectors below were verified against the live site; see CLAUDE.md.
+Every selector below was verified against the live site; see the README for the
+behaviour of the site that shaped this module.
 """
 import os
 import re

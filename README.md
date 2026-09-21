@@ -228,10 +228,31 @@ Two settings exist for hosts that differ from a developer laptop:
 Runs can also be triggered by hand from the Actions tab, which is the quickest way to check
 the deployment is healthy.
 
-**Scheduling caveats.** Five minutes is the most frequent schedule GitHub permits, and
-scheduled runs are queued and may be delayed under load, so the effective interval is closer
-to 5-20 minutes. Separately, the OAuth consent screen uses restricted Gmail scopes and stays
-in *Testing*, for which Google expires refresh tokens weekly -- when runs start failing
+### What triggers a run
+
+GitHub's own `schedule` trigger is best-effort: runs are queued, deprioritised under load,
+and may be dropped entirely. On this repository it did not fire once in the first half hour
+after the workflow was added, which is not good enough for an agent that is supposed to be
+reachable.
+
+So the primary trigger is `repository_dispatch`, poked by an external pinger
+([cron-job.org](https://cron-job.org), free) every few minutes:
+
+```
+POST https://api.github.com/repos/<owner>/<repo>/dispatches
+Authorization: Bearer <fine-grained PAT with Actions: read and write>
+Accept: application/vnd.github+json
+Content-Type: application/json
+
+{"event_type": "poll"}
+```
+
+That starts a run the moment the request lands. The `schedule` trigger is kept as a backstop
+for whenever it does decide to fire. Neither is a guarantee, so treat the response time as
+"within a few minutes, usually" rather than as a promise.
+
+**Token expiry.** The OAuth consent screen uses restricted Gmail scopes and stays in
+*Testing*, for which Google expires refresh tokens weekly. When runs start failing
 authentication, re-run `agent/mailer.py auth` locally and update the `GMAIL_TOKEN` secret.
 
 ## Limitations

@@ -6,11 +6,18 @@ name: NSUARB agent
 # lives in repository secrets.
 
 on:
+  # Primary trigger. An external pinger (cron-job.org) POSTs to the repository
+  # dispatches API every few minutes, which starts a run immediately. GitHub's
+  # own scheduler is best-effort and, on this repository, did not fire at all
+  # for the first half hour, so it is the backstop rather than the mechanism.
+  repository_dispatch:
+    types: [poll]
+
   schedule:
-    # Every 5 minutes, which is the most frequent schedule GitHub allows.
-    # Runs are queued and may be delayed under load, so treat this as "within
-    # roughly 5-20 minutes" rather than as a hard interval.
+    # Backstop only. Five minutes is the most frequent schedule GitHub allows,
+    # and scheduled runs are queued and may be delayed or dropped under load.
     - cron: "*/5 * * * *"
+
   workflow_dispatch:
     inputs:
       timing_scale:

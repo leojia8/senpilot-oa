@@ -23,3 +23,7 @@ __pycache__/
 .idea/
 .DS_Store
 Thumbs.db
+
+# Working notes, kept outside the submitted repo
+CLAUDE.md
+DEMO.md
