@@ -64,6 +64,9 @@ python -m venv .venv
 cp .env.example .env
 ```
 
+Paths below use the Windows interpreter, `.venv/Scripts/python.exe`. On macOS or Linux
+substitute `.venv/bin/python` throughout.
+
 ### Gmail credentials
 
 1. Create a Google Cloud project on the agent's own Google account.
